@@ -2,16 +2,30 @@
 /**
  * Stop hook for vector-memory plugin.
  *
- * Monitors context usage by checking transcript file size.
- * Warns at 50% estimated capacity, blocks at 75% to strongly
- * suggest checkpointing.
+ * Monitors session health via resource pressure signals from the transcript:
+ *   1. Turn count (main chain only, excludes subagent/sidechain entries)
+ *   2. Context length (input_tokens + cache_read_input_tokens + cache_creation_input_tokens)
+ *   3. Compression events (detected by sudden drops in context length)
  *
- * Thresholds are based on rough token-to-byte estimates:
- * - Claude's context window ≈ 200k tokens ≈ 800KB of text
- * - Transcript includes JSON overhead, so thresholds are conservative
+ * Based on session-monitor.py's monitoring approach, adapted for Stop hook format.
+ * Always approves — uses systemMessage for checkpoint recommendations.
+ *
+ * NOTE: Never use "block" in a Stop hook for monitoring purposes. It creates
+ * an infinite loop: block → Claude responds → Stop fires again → block → ...
  */
 
-import { statSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  closeSync,
+  statSync,
+} from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 interface HookInput {
   session_id: string;
@@ -20,47 +34,257 @@ interface HookInput {
   reason: string;
 }
 
-// Conservative thresholds accounting for transcript JSON overhead
-const WARN_THRESHOLD_KB = 350; // ~50% context usage
-const CRITICAL_THRESHOLD_KB = 550; // ~75% context usage
+// ── Configuration (matching session-monitor.py) ─────────────────────
+
+const TURN_WARN = 80;
+const TURN_STRONG = 150;
+const TURN_CRITICAL = 250;
+
+const CONTEXT_WARN = 100_000; // tokens
+const CONTEXT_STRONG = 140_000;
+const CONTEXT_CRITICAL = 170_000;
+
+const COMPRESS_WARN = 1;
+const COMPRESS_STRONG = 3;
+const COMPRESS_CRITICAL = 5;
+
+const STATE_DIR = join(tmpdir(), "claude-context-monitor");
+
+// ── State ───────────────────────────────────────────────────────────
+
+interface MonitorState {
+  last_offset: number;
+  turn_count: number;
+  compressions: number;
+  context_length: number;
+  peak_context_length: number;
+}
+
+function getStatePath(sessionId: string): string {
+  mkdirSync(STATE_DIR, { recursive: true });
+  return join(STATE_DIR, `${sessionId}.json`);
+}
+
+function loadState(sessionId: string): MonitorState {
+  const path = getStatePath(sessionId);
+  try {
+    if (existsSync(path)) {
+      return JSON.parse(readFileSync(path, "utf-8"));
+    }
+  } catch {}
+  return {
+    last_offset: 0,
+    turn_count: 0,
+    compressions: 0,
+    context_length: 0,
+    peak_context_length: 0,
+  };
+}
+
+function saveState(sessionId: string, state: MonitorState): void {
+  try {
+    const path = getStatePath(sessionId);
+    writeFileSync(path, JSON.stringify(state));
+  } catch {}
+}
+
+// ── Transcript analysis ─────────────────────────────────────────────
+
+function analyzeTranscript(
+  transcriptPath: string,
+  state: MonitorState
+): MonitorState {
+  if (!existsSync(transcriptPath)) return state;
+
+  const fileSize = statSync(transcriptPath).size;
+  if (fileSize <= state.last_offset) return state;
+
+  try {
+    const fd = openSync(transcriptPath, "r");
+    const buffer = Buffer.alloc(fileSize - state.last_offset);
+    readSync(fd, buffer, 0, buffer.length, state.last_offset);
+    closeSync(fd);
+
+    const newContent = buffer.toString("utf-8");
+
+    // Track the most recent main-chain entry for context length
+    // (matching ccstatusline's approach)
+    let mostRecentMainChainUsage: any = null;
+    let mostRecentTimestamp: Date | null = null;
+
+    for (const line of newContent.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      let data: any;
+      try {
+        data = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+
+      const usage = data.message?.usage;
+      if (!usage) continue;
+
+      // Skip sidechain (subagent) entries and API errors
+      if (data.isSidechain === true || data.isApiErrorMessage) continue;
+
+      state.turn_count += 1;
+
+      // Track most recent main-chain entry by timestamp
+      if (data.timestamp) {
+        const entryTime = new Date(data.timestamp);
+        if (!mostRecentTimestamp || entryTime > mostRecentTimestamp) {
+          mostRecentTimestamp = entryTime;
+          mostRecentMainChainUsage = usage;
+        }
+      }
+    }
+
+    // Context length = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+    // from the most recent main-chain entry
+    if (mostRecentMainChainUsage) {
+      const contextLength =
+        (mostRecentMainChainUsage.input_tokens || 0) +
+        (mostRecentMainChainUsage.cache_read_input_tokens ?? 0) +
+        (mostRecentMainChainUsage.cache_creation_input_tokens ?? 0);
+
+      // Detect compression: peak was high, current dropped significantly
+      if (
+        state.peak_context_length > 30_000 &&
+        contextLength < state.peak_context_length * 0.6 &&
+        contextLength > 0
+      ) {
+        state.compressions += 1;
+      }
+
+      state.context_length = contextLength;
+      if (contextLength > state.peak_context_length) {
+        state.peak_context_length = contextLength;
+      }
+    }
+
+    state.last_offset = fileSize;
+  } catch {}
+
+  return state;
+}
+
+// ── Evaluation ──────────────────────────────────────────────────────
+
+type Severity = "info" | "warn" | "strong" | "critical";
+
+const SEVERITY_ORDER: Severity[] = ["info", "warn", "strong", "critical"];
+
+function maxSeverity(a: Severity, b: Severity): Severity {
+  return SEVERITY_ORDER.indexOf(a) >= SEVERITY_ORDER.indexOf(b) ? a : b;
+}
+
+function evaluate(state: MonitorState): string | null {
+  const { turn_count: turns, context_length: ctx, compressions } = state;
+
+  const issues: string[] = [];
+  let severity: Severity = "info";
+
+  // Turn count
+  if (turns >= TURN_CRITICAL) {
+    issues.push(`Session is at ${turns} turns (critical)`);
+    severity = "critical";
+  } else if (turns >= TURN_STRONG) {
+    issues.push(`Session is at ${turns} turns (high)`);
+    severity = "strong";
+  } else if (turns >= TURN_WARN) {
+    issues.push(`Session is at ${turns} turns`);
+    severity = "warn";
+  }
+
+  // Context size (tokens)
+  if (ctx >= CONTEXT_CRITICAL) {
+    issues.push(
+      `Context size is ${ctx.toLocaleString()} tokens (near compression limit)`
+    );
+    severity = maxSeverity(severity, "critical");
+  } else if (ctx >= CONTEXT_STRONG) {
+    issues.push(
+      `Context size is ${ctx.toLocaleString()} tokens (compression approaching)`
+    );
+    severity = maxSeverity(severity, "strong");
+  } else if (ctx >= CONTEXT_WARN) {
+    issues.push(`Context size is ${ctx.toLocaleString()} tokens`);
+    severity = maxSeverity(severity, "warn");
+  }
+
+  // Compressions
+  const compressWord = compressions === 1 ? "compression" : "compressions";
+  if (compressions >= COMPRESS_CRITICAL) {
+    issues.push(
+      `${compressions} context ${compressWord} detected (significant quality loss likely)`
+    );
+    severity = maxSeverity(severity, "critical");
+  } else if (compressions >= COMPRESS_STRONG) {
+    issues.push(
+      `${compressions} context ${compressWord} detected (quality degrading)`
+    );
+    severity = maxSeverity(severity, "strong");
+  } else if (compressions >= COMPRESS_WARN) {
+    issues.push(`${compressions} context ${compressWord} detected`);
+    severity = maxSeverity(severity, "warn");
+  }
+
+  if (issues.length === 0) return null;
+
+  const label: Record<string, string> = {
+    warn: "SESSION HEALTH NOTE",
+    strong: "SESSION HEALTH WARNING",
+    critical: "SESSION HEALTH — ACTION RECOMMENDED",
+  };
+
+  const header = label[severity] || "SESSION HEALTH NOTE";
+  const parts = [`${header}: ${issues.join("; ")}.`];
+
+  if (severity === "critical") {
+    parts.push(
+      "Recommend: run /handoff:store, commit any pending work, and start a fresh session. " +
+        "Context quality degrades with each compression cycle."
+    );
+  } else if (severity === "strong") {
+    parts.push(
+      "Consider: finish current task, commit, and start a new session with /handoff:get " +
+        "to preserve quality."
+    );
+  } else {
+    parts.push(
+      "FYI: Context is growing. Consider breaking at the next natural boundary " +
+        "(after current task or commit)."
+    );
+  }
+
+  return parts.join(" ");
+}
+
+// ── Main ────────────────────────────────────────────────────────────
 
 async function main() {
   const input: HookInput = await Bun.stdin.json();
 
-  if (!input.transcript_path) {
-    // No transcript path available - approve silently
+  if (!input.transcript_path || !input.session_id) {
     console.log(JSON.stringify({ decision: "approve" }));
     return;
   }
 
-  let fileSizeKB: number;
-  try {
-    const stats = statSync(input.transcript_path);
-    fileSizeKB = stats.size / 1024;
-  } catch {
-    // Can't read transcript - approve silently
-    console.log(JSON.stringify({ decision: "approve" }));
-    return;
-  }
+  let state = loadState(input.session_id);
+  state = analyzeTranscript(input.transcript_path, state);
+  const message = evaluate(state);
+  saveState(input.session_id, state);
 
-  const usagePercent = Math.round((fileSizeKB / (CRITICAL_THRESHOLD_KB / 0.75)) * 100);
-
-  if (fileSizeKB >= CRITICAL_THRESHOLD_KB) {
-    // 75%+ - block and strongly recommend checkpoint
-    const output = {
-      decision: "block",
-      reason: `Context usage is estimated at ~${usagePercent}%. Strongly recommend storing a checkpoint (/checkpoint:store) and clearing context (/clear) to prevent context rot and maintain memory quality. Ask the user before proceeding.`,
-    };
-    console.log(JSON.stringify(output));
-  } else if (fileSizeKB >= WARN_THRESHOLD_KB) {
-    // 50-75% - warn but approve
-    const output = {
-      decision: "approve",
-      systemMessage: `Context usage is estimated at ~${usagePercent}%. Consider storing a checkpoint with /checkpoint:store soon to preserve session state.`,
-    };
-    console.log(JSON.stringify(output));
+  if (message) {
+    console.log(
+      JSON.stringify({
+        decision: "approve",
+        systemMessage: message,
+      })
+    );
   } else {
-    // Under 50% - approve silently
     console.log(JSON.stringify({ decision: "approve" }));
   }
 }

@@ -2,39 +2,61 @@
 /**
  * SessionStart hook for vector-memory plugin.
  *
- * Checks if the vector-memory server is running and suggests
- * loading the checkpoint if one is available.
+ * Fetches the latest checkpoint from the vector-memory server's HTTP API
+ * and outputs it as session context, including any referenced memories.
+ *
+ * Based on vector-memory-mcp/hooks/session-start.ts but uses the HTTP API
+ * instead of direct DB access so it works as a standalone plugin hook.
  */
 
 const VECTOR_MEMORY_URL =
   process.env.VECTOR_MEMORY_URL ?? "http://127.0.0.1:3271";
 
-async function main() {
-  // Read hook input from stdin
-  const input = await Bun.stdin.text();
+interface CheckpointResponse {
+  content: string;
+  metadata: Record<string, unknown>;
+  referencedMemories: Array<{ id: string; content: string }>;
+  updatedAt: string;
+}
 
-  // Check if server is running
+async function main() {
+  // Read hook input from stdin (required by hook protocol)
+  await Bun.stdin.text();
+
+  // Fetch latest checkpoint from running server
+  let checkpoint: CheckpointResponse;
   try {
-    const response = await fetch(`${VECTOR_MEMORY_URL}/health`, {
+    const response = await fetch(`${VECTOR_MEMORY_URL}/checkpoint`, {
       signal: AbortSignal.timeout(5000),
     });
+
+    if (response.status === 404) {
+      // No checkpoint found — start fresh
+      return;
+    }
 
     if (!response.ok) {
       return;
     }
 
-    // Server is running - suggest checkpoint load
-    const output = {
-      systemMessage:
-        "Vector memory server is available. Ask the user if they would like to load their project checkpoint with /checkpoint:get. If they decline, proceed normally.",
-    };
-
-    console.log(JSON.stringify(output));
+    checkpoint = await response.json();
   } catch {
-    // Server not running - no action needed.
+    // Server not running or unreachable — no action needed.
     // The MCP server may still be starting up via stdio.
     return;
   }
+
+  // Build output: checkpoint content + referenced memories
+  let output = checkpoint.content;
+
+  if (checkpoint.referencedMemories.length > 0) {
+    const memories = checkpoint.referencedMemories
+      .map((m) => `### Memory: ${m.id}\n${m.content}`)
+      .join("\n\n");
+    output += `\n\n## Referenced Memories\n\n${memories}`;
+  }
+
+  console.log(output);
 }
 
 main().catch(() => process.exit(0));
