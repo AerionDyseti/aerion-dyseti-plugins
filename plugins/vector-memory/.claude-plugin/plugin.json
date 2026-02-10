@@ -1,6 +1,6 @@
 {
   "name": "vector-memory",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "RAG-powered session memory with checkpoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
