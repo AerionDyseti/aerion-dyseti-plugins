@@ -6,7 +6,7 @@
     "name": "AerionDyseti",
     "url": "https://github.com/AerionDyseti"
   },
-  "repository": "https://github.com/AerionDyseti/claude-vector-memory",
+  "repository": "https://github.com/AerionDyseti/aerion-dyseti-plugins",
   "license": "MIT",
   "keywords": ["memory", "rag", "checkpoints", "session-persistence", "vector-search"]
 }

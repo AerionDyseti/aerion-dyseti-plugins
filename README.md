@@ -1,32 +1,28 @@
-# claude-vector-memory
+# aerion-dyseti-plugins
 
-A Claude Code plugin that provides RAG-powered session memory with checkpoints. Automatically loads the [vector-memory-mcp](https://github.com/AerionDyseti/vector-memory-mcp) server and adds checkpoint commands, workflow skills, and session lifecycle hooks.
-
-## Prerequisites
-
-- [Bun](https://bun.sh/) 1.0+
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+Claude Code plugin marketplace by AerionDyseti.
 
 ## Install
 
-Add this plugin to Claude Code:
-
 ```bash
-claude plugin add /path/to/claude-vector-memory
+/plugin marketplace add AerionDyseti/aerion-dyseti-plugins
 ```
 
-Or clone and use directly:
+Then install individual plugins:
 
 ```bash
-git clone https://github.com/AerionDyseti/claude-vector-memory.git
-claude --plugin-dir /path/to/claude-vector-memory
+/plugin install vector-memory@aerion-dyseti-plugins
 ```
 
-## What's Included
+## Plugins
 
-### MCP Server (auto-loaded)
+### vector-memory
 
-The plugin automatically starts the `@aeriondyseti/vector-memory-mcp` server, providing:
+RAG-powered session memory with checkpoints for Claude Code. Automatically loads the [vector-memory-mcp](https://github.com/AerionDyseti/vector-memory-mcp) server and adds checkpoint commands, workflow skills, and session lifecycle hooks.
+
+**Prerequisites:** [Bun](https://bun.sh/) 1.0+
+
+#### MCP Server (auto-loaded)
 
 | Tool | Description |
 |------|-------------|
@@ -39,21 +35,21 @@ The plugin automatically starts the `@aeriondyseti/vector-memory-mcp` server, pr
 | `store_checkpoint` | Save session state snapshot |
 | `get_checkpoint` | Restore session state |
 
-### Commands
+#### Commands
 
 | Command | Description |
 |---------|-------------|
 | `/checkpoint:get` | Load project context from checkpoint + git + relevant memories |
 | `/checkpoint:store` | Extract session memories, then store a checkpoint snapshot |
 
-### Skills
+#### Skills
 
 | Skill | Triggers On |
 |-------|-------------|
 | **Checkpoint Workflow** | "store a checkpoint", "resume work", "where were we", session management |
 | **Vector Memory Usage** | "remember this", "search memories", "what did we decide", proactive memory search |
 
-### Hooks
+#### Hooks
 
 | Event | Behavior |
 |-------|----------|
@@ -61,9 +57,7 @@ The plugin automatically starts the `@aeriondyseti/vector-memory-mcp` server, pr
 | **UserPromptSubmit** | Detects `/clear` and suggests storing checkpoint first |
 | **Stop** | Monitors context usage — warns at 50%, blocks at 75% |
 
-## Workflow
-
-The recommended session workflow:
+#### Workflow
 
 ```
 1. Session starts → Accept checkpoint load suggestion
@@ -74,9 +68,7 @@ The recommended session workflow:
 6. Repeat
 ```
 
-## Configuration
-
-The MCP server supports these environment variables:
+#### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
