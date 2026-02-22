@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Claude Code plugins by AerionDyseti",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
@@ -14,12 +14,23 @@
       "name": "vector-memory",
       "source": "./plugins/vector-memory",
       "description": "RAG-powered session memory with checkpoints for Claude Code",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": {
         "name": "AerionDyseti"
       },
       "category": "productivity",
       "tags": ["memory", "rag", "checkpoints", "session-persistence", "vector-search"]
+    },
+    {
+      "name": "dev-flow",
+      "source": "./plugins/dev-flow",
+      "description": "Structured development workflow skills and agents for Claude Code",
+      "version": "0.1.0",
+      "author": {
+        "name": "AerionDyseti"
+      },
+      "category": "productivity",
+      "tags": ["workflow", "code-review", "planning", "debugging", "agents"]
     }
   ]
 }
