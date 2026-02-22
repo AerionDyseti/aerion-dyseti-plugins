@@ -75,6 +75,25 @@ RAG-powered session memory with checkpoints for Claude Code. Automatically loads
 | `VECTOR_MEMORY_DB_PATH` | `.vector-memory/memories.db` | Database location |
 | `VECTOR_MEMORY_HTTP_PORT` | `3271` | HTTP server port |
 
+### frontend-design
+
+Frontend design guidance, Playwright browser automation, and Playwright MCP server in one plugin. Combines three complementary tools for building and testing web interfaces.
+
+```bash
+/plugin install frontend-design@aerion-dyseti-plugins
+```
+
+#### Skills
+
+| Skill | Triggers On |
+|-------|-------------|
+| **Frontend Design** | "build a landing page", "create a component", UI/UX implementation tasks |
+| **Playwright** | "test my website", "take a screenshot", browser automation tasks |
+
+#### MCP Server (auto-loaded)
+
+The [@playwright/mcp](https://github.com/microsoft/playwright-mcp) server provides 25+ browser control tools (navigate, click, fill, snapshot, etc.) accessible directly as MCP tools.
+
 ## License
 
 MIT

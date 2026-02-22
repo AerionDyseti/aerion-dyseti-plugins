@@ -31,6 +31,17 @@
       },
       "category": "productivity",
       "tags": ["workflow", "code-review", "planning", "debugging", "agents"]
+    },
+    {
+      "name": "frontend-design",
+      "source": "./plugins/frontend-design",
+      "description": "Frontend design guidance, Playwright browser automation skill, and Playwright MCP server in one plugin",
+      "version": "0.0.1",
+      "author": {
+        "name": "AerionDyseti"
+      },
+      "category": "frontend",
+      "tags": ["frontend", "design", "ui", "ux", "playwright", "browser", "automation", "testing", "e2e", "mcp"]
     }
   ]
 }
