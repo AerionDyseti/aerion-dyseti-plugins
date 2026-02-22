@@ -36,6 +36,17 @@ For each issue: file:line reference, what's wrong, why it matters, how to fix (i
 
 **Reasoning:** 1-2 sentences.
 
+## Confidence Scoring
+
+Rate each potential issue 0-100:
+
+- **0-25:** Likely false positive or purely stylistic preference
+- **25-50:** Might be real but could be a nitpick
+- **50-75:** Real issue but lower practical impact
+- **75-100:** Verified real issue that will affect functionality, security, or maintainability
+
+**Only report issues with confidence >= 75.** Quality over quantity — fewer high-confidence issues are more useful than a long list of maybes. Include the confidence score with each issue.
+
 ## Rules
 
 - Categorize by actual severity — not everything is critical
@@ -43,3 +54,4 @@ For each issue: file:line reference, what's wrong, why it matters, how to fix (i
 - Explain why issues matter, not just what's wrong
 - Don't review code you didn't read
 - Give a clear verdict
+- Skip low-confidence nitpicks — they waste the implementer's time
