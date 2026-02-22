@@ -7,6 +7,16 @@ description: This skill should be used when the user asks to "store a memory", "
 
 The vector memory system provides semantic, project-scoped memory storage. Memories persist across sessions and are retrieved via semantic search — meaning queries find relevant memories by meaning, not just keyword matching.
 
+## Database Storage and Version Control
+
+The vector-memory MCP server stores its database as a local file (`.vector-memory/memory.lance`) inside the project directory. **This database should be committed to version control by default.** Committing the database ensures:
+
+- **Portability** — cloning the repo includes all accumulated project context, so new sessions (or new machines) start with full memory intact
+- **Collaboration** — teammates benefit from shared architectural decisions, known blockers, and implementation insights
+- **Durability** — the database is backed up alongside the code it describes, preventing accidental loss
+
+The database is a compact binary format (LanceDB) that diffs and merges reasonably well in Git. If a project has sensitive memories that should not be committed, add `.vector-memory/` to `.gitignore` on a per-project basis — but the default expectation is to commit it.
+
 ## When to Proactively Search Memories
 
 Search memories BEFORE making decisions or assumptions. The cost of an unnecessary search is low; the cost of missing relevant context is high.
